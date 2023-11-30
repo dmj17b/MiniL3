@@ -1,6 +1,8 @@
 
 #include <Encoder.h>
 #include <PulsePosition.h>
+#include "TeensyTimerTool.h"
+using namespace TeensyTimerTool;
 
 #define Hip_INA 14
 #define Hip_INB 15
@@ -20,6 +22,8 @@ int CPR = 12; // Counts per revolution of encoders
 int maxInput = 500;
 int maxPWM = 255;
 
+// Timer that will call control functions
+PeriodicTimer controlTimer;
 // RC receiver input
 PulsePositionInput RCX(FALLING);
 
@@ -54,7 +58,7 @@ float desWheelVel = 0;
 
 
 
-
+volatile int controlNum = 0;
 
 
 /************************************ SETUP ****************************************/
@@ -63,8 +67,7 @@ void setup() {
   Serial.begin(9600);
   analogWriteResolution(8);
   RCX.begin(12);
-  
-
+  controlTimer.begin(controlFunc,5000);
 }
 
 
@@ -89,31 +92,32 @@ void loop() {
   // Read safety trigger
   int safety = RCX.read(5);
 
-
 // Safety off:
   if(safety>1500){
+
+    // With safety off, begin wheel control
+    controlTimer.start();
+
+    // Map joystick input to 
     desHipPos = mapfloat(RCX.read(3),999,1999,-90,90);
-    //desKneePos = mapfloat(RCX.read(1),999,1988,-90,90);
+
+    // Map joystick input to a knee velocity
     float desKneeVel = mapfloat(RCX.read(1),999,1988,-5,5);
     
+    // Apply a controller deadzone for knee velocity
     if(desKneeVel<=0.1 && desKneeVel >= -0.1)desKneeVel=0;
-    Serial.println(desKneePos);
+    // Increment desired knee position based on input velocity
     desKneePos+=0.0001*desKneeVel;
     desWheelVel = mapfloat(RCX.read(2),999,1988,-500,500);
 
     
 
-    // Call control function every 5ms
-    // (This will eventually be on a timer interrupt)
-    if(millis()%5==0){
-      hipControl();
-      kneeControl();
-      wheelControl(desWheelVel);
-    }
-
   }
 // Safety on:
   else{
+    // Safety is on, so stop calling the motor control function
+    controlTimer.stop();
+    // Force motors into coasting mode
     Serial.println("Safety on, motors off!");
     analogWrite(Hip_INA,0);
     analogWrite(Hip_INB,0);
@@ -140,6 +144,12 @@ void loop() {
 
 
 /********************** FUNCTIONS ********************/
+
+void controlFunc(){
+  hipControl();
+  kneeControl();
+  wheelControl();
+}
 
 // PD control for knee
 void kneeControl(){
@@ -204,9 +214,9 @@ void hipControl(){
 
 }
 
-void wheelControl(int input){
+void wheelControl(){
   int brakeTol = 5;
-  int wheelPWM = map(input,-maxInput,maxInput,-maxPWM,maxPWM);
+  int wheelPWM = map(desWheelVel,-maxInput,maxInput,-maxPWM,maxPWM);
 
   // If wheel control is negative and out of braking range, send motor inputs
   if(wheelPWM>brakeTol){
