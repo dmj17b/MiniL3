@@ -4,6 +4,7 @@
 #include "TeensyTimerTool.h"
 using namespace TeensyTimerTool;
 
+// Input pins:
 #define Hip_INA 14
 #define Hip_INB 15
 #define Hip_ENCA 4
@@ -16,6 +17,9 @@ using namespace TeensyTimerTool;
 
 #define Wheel_INA 18
 #define Wheel_INB 19
+
+//DEBUG:
+bool debug = false;
 
 // General control variables
 int CPR = 12; // Counts per revolution of encoders
@@ -31,7 +35,7 @@ PulsePositionInput RCX(FALLING);
 float hipK = 15;
 float hipD = 10;
 float lastHipPos = 0;
-float hipGearRatio = 210.59*12*40/16;
+float hipGearRatio = 379.17*12*40/16;
 volatile int hipInput;
 
 // Knee Control Variables
@@ -39,7 +43,7 @@ float kneeK = 50;
 float kneeD = 5;
 float currKneePos = 0;
 float lastKneePos = 0;
-float kneeGearRatio = 150.58*12*48/20;
+float kneeGearRatio = 379.17*12*48/20;
 volatile int kneeInput = 0;
 volatile int kneePWM;
 
@@ -58,16 +62,12 @@ float desWheelVel = 0;
 
 
 
-volatile int controlNum = 0;
-
-
 /************************************ SETUP ****************************************/
 void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(9600);
-  analogWriteResolution(8);
-  RCX.begin(12);
-  controlTimer.begin(controlFunc,5000);
+  Serial.begin(9600); // Begin serial communications
+  analogWriteResolution(8); // Set analog write resolution (teensy is capable of higher)
+  RCX.begin(12);  // Start PPM reader on pin 12
+  controlTimer.begin(controlFunc,5000); // Set up control timer to call "controlFunc" every 5000 microseconds
 }
 
 
@@ -91,6 +91,14 @@ void loop() {
   
   // Read safety trigger
   int safety = RCX.read(5);
+  if(debug){
+    Serial.print("Hip motor position: ");
+    Serial.println(360*hipEnc.read()/hipGearRatio);
+    Serial.print("Desired hip position: ");
+    Serial.println(desHipPos);
+    Serial.print("Hip Motor Command: ");
+    Serial.println(hipInput);
+  }
 
 // Safety off:
   if(safety>1500){
@@ -107,7 +115,9 @@ void loop() {
     // Apply a controller deadzone for knee velocity
     if(desKneeVel<=0.1 && desKneeVel >= -0.1)desKneeVel=0;
     // Increment desired knee position based on input velocity
-    desKneePos+=0.0001*desKneeVel;
+    desKneePos+=0.0002*desKneeVel;
+
+    // Map joystick input to wheel motor input
     desWheelVel = mapfloat(RCX.read(2),999,1988,-500,500);
 
     
@@ -117,6 +127,7 @@ void loop() {
   else{
     // Safety is on, so stop calling the motor control function
     controlTimer.stop();
+
     // Force motors into coasting mode
     Serial.println("Safety on, motors off!");
     analogWrite(Hip_INA,0);
@@ -127,10 +138,6 @@ void loop() {
     analogWrite(Wheel_INB,0);
   }
 
-
-
-
-
 }
 
 
@@ -138,13 +145,9 @@ void loop() {
 
 
 
+/******************************* FUNCTIONS *********************************/
 
-
-
-
-
-/********************** FUNCTIONS ********************/
-
+// Function to be called for control timer
 void controlFunc(){
   hipControl();
   kneeControl();
@@ -214,8 +217,11 @@ void hipControl(){
 
 }
 
+// Function to send wheel control commands
 void wheelControl(){
-  int brakeTol = 5;
+  int brakeTol = 5; // Input braking tolerance
+
+  // Mapping desired wheel velocity to a wheel PWM signal
   int wheelPWM = map(desWheelVel,-maxInput,maxInput,-maxPWM,maxPWM);
 
   // If wheel control is negative and out of braking range, send motor inputs
@@ -236,6 +242,7 @@ void wheelControl(){
 
 }
 
+// Helper function to interpolate between float values:
 float mapfloat(long x, long in_min, long in_max, long out_min, long out_max)
 {
   return (float)(x - in_min) * (out_max - out_min) / (float)(in_max - in_min) + out_min;
